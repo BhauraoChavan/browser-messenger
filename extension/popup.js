@@ -21,6 +21,12 @@ const sendBtn = document.getElementById("sendBtn");
 
 const urlBtn = document.getElementById("urlBtn");
 
+chrome.storage.local.get(["roomId"], (result) => {
+  if (result.roomId) {
+    roomInput.value = result.roomId;
+  }
+});
+
 // Connect to server
 connectBtn.addEventListener("click", connect);
 
@@ -33,15 +39,22 @@ function connect() {
     return;
   }
 
+  chrome.storage.local.set({ roomId });
+
   statusElement.textContent = "Connecting...";
   connectionLogo.src = "icons/preload.jpg";
 
-  socket = new WebSocket(SERVER_URL);
+  if (socket && socket.readyState !== WebSocket.CLOSED) {
+    socket.close();
+  }
 
-  socket.addEventListener("open", () => {
+  const currentSocket = new WebSocket(SERVER_URL);
+  socket = currentSocket;
+
+  currentSocket.addEventListener("open", () => {
     statusElement.textContent = "Connected";
 
-    socket.send(
+    currentSocket.send(
       JSON.stringify({
         type: "join",
         roomId: roomId,
@@ -49,18 +62,26 @@ function connect() {
     );
   });
 
-  socket.addEventListener("message", (event) => {
+  currentSocket.addEventListener("message", (event) => {
     const data = JSON.parse(event.data);
 
     handleMessage(data);
   });
 
-  socket.addEventListener("close", () => {
+  currentSocket.addEventListener("close", () => {
+    if (socket !== currentSocket) {
+      return;
+    }
+
     statusElement.textContent = "Disconnected";
     connectionLogo.src = "icons/preload.jpg";
   });
 
-  socket.addEventListener("error", () => {
+  currentSocket.addEventListener("error", () => {
+    if (socket !== currentSocket) {
+      return;
+    }
+
     statusElement.textContent = "Connection error";
     connectionLogo.src = "icons/preload.jpg";
   });

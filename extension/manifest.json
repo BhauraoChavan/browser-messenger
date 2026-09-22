@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "description": "Send messages and URLs between two Chrome browsers.",
   "permissions": [
-    "tabs"
+    "tabs",
+    "storage"
   ],
   "action": {
     "default_popup": "popup.html",
