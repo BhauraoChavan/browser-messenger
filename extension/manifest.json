@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Messenger",
+  "version": "1.0.0",
+  "description": "Send messages and URLs between two Chrome browsers.",
+  "permissions": [
+    "tabs"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

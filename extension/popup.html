@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Browser Messenger</title>
+
+  <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+
+  <div class="container">
+
+    <h1>Browser Messenger</h1>
+
+    <!-- Connection -->
+    <div id="connectionSection">
+
+      <input
+        id="roomInput"
+        type="text"
+        placeholder="Enter Room ID"
+      >
+
+      <button id="connectBtn">
+        Connect
+      </button>
+
+    </div>
+
+    <!-- Status -->
+    <div class="status">
+      Status:
+      <span id="status">Disconnected</span>
+    </div>
+
+    <!-- Chat -->
+    <div id="chatSection" class="hidden">
+
+      <div id="messages"></div>
+
+      <div class="inputArea">
+
+        <input
+          id="messageInput"
+          type="text"
+          placeholder="Type message..."
+        >
+
+        <button id="sendBtn">
+          Send
+        </button>
+
+      </div>
+
+      <button id="urlBtn">
+        Send Current URL
+      </button>
+
+    </div>
+
+  </div>
+
+  <script src="popup.js"></script>
+
+</body>
+</html>
