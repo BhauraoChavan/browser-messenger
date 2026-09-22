@@ -12,6 +12,8 @@ const connectBtn = document.getElementById("connectBtn");
 
 const statusElement = document.getElementById("status");
 
+const connectionLogo = document.getElementById("connectionLogo");
+
 const chatSection = document.getElementById("chatSection");
 
 const messagesElement = document.getElementById("messages");
@@ -37,6 +39,7 @@ function connect() {
   }
 
   statusElement.textContent = "Connecting...";
+  connectionLogo.src = "preloade.jpg";
 
   socket = new WebSocket(SERVER_URL);
 
@@ -67,6 +70,7 @@ function connect() {
   socket.addEventListener("close", () => {
 
     statusElement.textContent = "Disconnected";
+    connectionLogo.src = "preloade.jpg";
 
   });
 
@@ -74,6 +78,7 @@ function connect() {
   socket.addEventListener("error", () => {
 
     statusElement.textContent = "Connection error";
+    connectionLogo.src = "preloade.jpg";
 
   });
 
@@ -85,6 +90,7 @@ function handleMessage(data) {
 
   if (data.type === "joined") {
 
+    connectionLogo.src = "loaded.jpg";
     chatSection.classList.remove("hidden");
 
     addSystemMessage(

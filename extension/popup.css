@@ -17,6 +17,14 @@ body {
   padding: 15px;
 }
 
+.connectionLogo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  margin: 0 auto 10px;
+}
+
 h1 {
   text-align: center;
 
