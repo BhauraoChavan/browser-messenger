@@ -4,7 +4,7 @@ let roomId = null;
 
 
 // Change this when you deploy your server
-const SERVER_URL = "ws://localhost:8080";
+ const SERVER_URL = "wss://browser-messenger.onrender.com";
 
 
 const roomInput = document.getElementById("roomInput");
