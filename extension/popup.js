@@ -1,25 +1,30 @@
-let socket = null;
-
-let roomId = null;
-
-// Change this when you deploy your server
-const SERVER_URL = "wss://browser-messenger.onrender.com";
-
 const roomInput = document.getElementById("roomInput");
 const connectBtn = document.getElementById("connectBtn");
-
 const statusElement = document.getElementById("status");
-
 const connectionLogo = document.getElementById("connectionLogo");
-
 const chatSection = document.getElementById("chatSection");
-
 const messagesElement = document.getElementById("messages");
-
 const messageInput = document.getElementById("messageInput");
 const sendBtn = document.getElementById("sendBtn");
 
-const urlBtn = document.getElementById("urlBtn");
+let friendConnected = false;
+
+function setMessagingEnabled(enabled) {
+  friendConnected = enabled;
+  messageInput.disabled = !enabled;
+  sendBtn.disabled = !enabled;
+}
+
+function applyStatus(status) {
+  statusElement.textContent = status;
+  connectionLogo.src = status === "Connected"
+    ? "icons/loaded.jpg"
+    : "icons/preload.jpg";
+
+  if (status !== "Connected") {
+    setMessagingEnabled(false);
+  }
+}
 
 chrome.storage.local.get(["roomId"], (result) => {
   if (result.roomId) {
@@ -27,12 +32,31 @@ chrome.storage.local.get(["roomId"], (result) => {
   }
 });
 
-// Connect to server
-connectBtn.addEventListener("click", connect);
+chrome.runtime.sendMessage({ type: "getState" }, (state) => {
+  if (chrome.runtime.lastError || !state) {
+    return;
+  }
 
-// Connect function
-function connect() {
-  roomId = roomInput.value.trim();
+  applyStatus(state.status);
+  setMessagingEnabled(state.friendConnected);
+  if (state.status === "Connected") {
+    chatSection.classList.remove("hidden");
+  }
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === "status") {
+    applyStatus(message.status);
+    return;
+  }
+
+  if (message.type === "serverMessage") {
+    handleMessage(message.data);
+  }
+});
+
+connectBtn.addEventListener("click", () => {
+  const roomId = roomInput.value.trim();
 
   if (!roomId) {
     alert("Please enter a Room ID.");
@@ -40,96 +64,11 @@ function connect() {
   }
 
   chrome.storage.local.set({ roomId });
+  applyStatus("Connecting...");
+  setMessagingEnabled(false);
+  chrome.runtime.sendMessage({ type: "connect", roomId });
+});
 
-  statusElement.textContent = "Connecting...";
-  connectionLogo.src = "icons/preload.jpg";
-
-  if (socket && socket.readyState !== WebSocket.CLOSED) {
-    socket.close();
-  }
-
-  const currentSocket = new WebSocket(SERVER_URL);
-  socket = currentSocket;
-
-  currentSocket.addEventListener("open", () => {
-    statusElement.textContent = "Connected";
-
-    currentSocket.send(
-      JSON.stringify({
-        type: "join",
-        roomId: roomId,
-      }),
-    );
-  });
-
-  currentSocket.addEventListener("message", (event) => {
-    const data = JSON.parse(event.data);
-
-    handleMessage(data);
-  });
-
-  currentSocket.addEventListener("close", () => {
-    if (socket !== currentSocket) {
-      return;
-    }
-
-    statusElement.textContent = "Disconnected";
-    connectionLogo.src = "icons/preload.jpg";
-  });
-
-  currentSocket.addEventListener("error", () => {
-    if (socket !== currentSocket) {
-      return;
-    }
-
-    statusElement.textContent = "Connection error";
-    connectionLogo.src = "icons/preload.jpg";
-  });
-}
-
-// Handle incoming messages
-function handleMessage(data) {
-  if (data.type === "joined") {
-    connectionLogo.src = "icons/loaded.jpg";
-    chatSection.classList.remove("hidden");
-
-    addSystemMessage(`Joined room: ${data.roomId}`);
-
-    if (data.users === 1) {
-      addSystemMessage("Waiting for your friend...");
-    }
-
-    return;
-  }
-
-  if (data.type === "user-joined") {
-    addSystemMessage("Your friend joined the room 🟢");
-
-    return;
-  }
-
-  if (data.type === "user-left") {
-    addSystemMessage("Your friend left the room 🔴");
-
-    return;
-  }
-
-  if (data.type === "message") {
-    if (data.messageType === "url") {
-      addURLMessage(data.text);
-    } else {
-      addFriendMessage(data.text);
-    }
-
-    return;
-  }
-
-  if (data.type === "error") {
-    alert(data.message);
-  }
-}
-
-// Send normal message
 sendBtn.addEventListener("click", sendMessage);
 
 messageInput.addEventListener("keydown", (event) => {
@@ -138,6 +77,40 @@ messageInput.addEventListener("keydown", (event) => {
   }
 });
 
+function handleMessage(data) {
+  if (data.type === "joined") {
+    chatSection.classList.remove("hidden");
+    setMessagingEnabled(data.users >= 2);
+    addSystemMessage(`Joined room: ${data.roomId}`);
+
+    if (data.users === 1) {
+      addSystemMessage("Waiting for your friend...");
+    }
+    return;
+  }
+
+  if (data.type === "user-joined") {
+    setMessagingEnabled(true);
+    addSystemMessage("Your friend joined the room 🟢");
+    return;
+  }
+
+  if (data.type === "user-left") {
+    setMessagingEnabled(false);
+    addSystemMessage("Your friend left the room 🔴");
+    return;
+  }
+
+  if (data.type === "message") {
+    addFriendMessage(data.text);
+    return;
+  }
+
+  if (data.type === "error") {
+    alert(data.message);
+  }
+}
+
 function sendMessage() {
   const text = messageInput.value.trim();
 
@@ -145,124 +118,38 @@ function sendMessage() {
     return;
   }
 
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    alert("Not connected.");
-
+  if (!friendConnected) {
+    addSystemMessage("Waiting for your friend to join...");
     return;
   }
 
-  socket.send(
-    JSON.stringify({
-      type: "message",
-      messageType: "text",
-      text: text,
-    }),
-  );
+  chrome.runtime.sendMessage({ type: "send", text }, (response) => {
+    if (chrome.runtime.lastError || !response || !response.ok) {
+      alert(response?.error || "Not connected.");
+      return;
+    }
 
-  addMyMessage(text);
-
-  messageInput.value = "";
-}
-
-// Send current URL
-urlBtn.addEventListener("click", async () => {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    alert("Not connected.");
-
-    return;
-  }
-
-  const tabs = await chrome.tabs.query({
-    active: true,
-    currentWindow: true,
+    addMyMessage(text);
+    messageInput.value = "";
   });
+}
 
-  if (!tabs.length) {
-    return;
-  }
-
-  const url = tabs[0].url;
-
-  socket.send(
-    JSON.stringify({
-      type: "message",
-      messageType: "url",
-      text: url,
-    }),
-  );
-
-  addURLMessage(url);
-});
-
-// Add my message
 function addMyMessage(text) {
-  const div = document.createElement("div");
-
-  div.className = "message mine";
-
-  div.textContent = `You: ${text}`;
-
-  messagesElement.appendChild(div);
-
-  scrollMessages();
+  addMessage(`You: ${text}`, "mine");
 }
 
-// Add friend's message
 function addFriendMessage(text) {
-  const div = document.createElement("div");
-
-  div.className = "message friend";
-
-  div.textContent = `Friend: ${text}`;
-
-  messagesElement.appendChild(div);
-
-  scrollMessages();
+  addMessage(`Friend: ${text}`, "friend");
 }
 
-// Add URL
-function addURLMessage(url) {
-  const div = document.createElement("div");
-
-  div.className = "message friend";
-
-  div.innerHTML = `
-    Friend sent URL:
-    <br>
-    <a href="${escapeHTML(url)}" target="_blank">
-      ${escapeHTML(url)}
-    </a>
-  `;
-
-  messagesElement.appendChild(div);
-
-  scrollMessages();
-}
-
-// System message
 function addSystemMessage(text) {
+  addMessage(text, "system");
+}
+
+function addMessage(text, className) {
   const div = document.createElement("div");
-
-  div.className = "message system";
-
+  div.className = `message ${className}`;
   div.textContent = text;
-
   messagesElement.appendChild(div);
-
-  scrollMessages();
-}
-
-// Scroll chat
-function scrollMessages() {
   messagesElement.scrollTop = messagesElement.scrollHeight;
-}
-
-// Basic HTML escaping
-function escapeHTML(value) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }

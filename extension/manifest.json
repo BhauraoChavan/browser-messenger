@@ -4,9 +4,12 @@
   "version": "1.0.0",
   "description": "Send messages and URLs between two Chrome browsers.",
   "permissions": [
-    "tabs",
-    "storage"
+    "storage",
+    "alarms"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
