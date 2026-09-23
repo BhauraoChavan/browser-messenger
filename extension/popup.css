@@ -6,7 +6,7 @@ body {
   margin: 0;
   padding: 0;
 
-  width: 360px;
+  width: 380px;
 
   font-family: Arial, sans-serif;
 
@@ -47,6 +47,11 @@ input {
   font-size: 14px;
 }
 
+input:disabled {
+  background: #f0f0f0;
+  color: #888;
+}
+
 button {
   width: 100%;
 
@@ -71,7 +76,20 @@ button:hover {
   opacity: 0.9;
 }
 
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: #6b7280;
+}
+
 .status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
   margin: 10px 0;
 
   font-size: 13px;
@@ -81,8 +99,13 @@ button:hover {
   font-weight: bold;
 }
 
+.presence {
+  font-size: 12px;
+  color: #6b7280;
+}
+
 #messages {
-  height: 250px;
+  height: 260px;
 
   overflow-y: auto;
 
@@ -107,6 +130,8 @@ button:hover {
   background: #eeeeee;
 
   word-wrap: break-word;
+
+  font-size: 13px;
 }
 
 .message.mine {
@@ -116,6 +141,16 @@ button:hover {
 
 .message.friend {
   background: #f3f4f6;
+}
+
+.messageStatus {
+  margin-left: 8px;
+  color: #9ca3af;
+  font-weight: bold;
+}
+
+.messageStatus.read {
+  color: #2563eb;
 }
 
 .message.system {
@@ -129,7 +164,15 @@ button:hover {
 }
 
 .message a {
+  color: #2563eb;
   word-break: break-all;
+}
+
+.message .messageTime {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #9ca3af;
 }
 
 .inputArea {
@@ -141,11 +184,17 @@ button:hover {
 .inputArea input {
   flex: 1;
 
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .inputArea button {
   width: 70px;
+  margin-bottom: 0;
+}
+
+.inputArea button.iconButton {
+  width: 42px;
+  background: #059669;
 }
 
 .hidden {

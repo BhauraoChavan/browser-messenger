@@ -5,7 +5,14 @@
   "description": "Send messages and URLs between two Chrome browsers.",
   "permissions": [
     "storage",
-    "alarms"
+    "alarms",
+    "notifications",
+    "tabs"
+  ],
+  "host_permissions": [
+    "wss://browser-messenger.onrender.com/*",
+    "ws://localhost/*",
+    "ws://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js"
