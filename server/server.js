@@ -166,7 +166,7 @@ wss.on("connection", (socket) => {
 
         // Maximum 2 users per room
         if (
-          room.clients.size >= 2 &&
+          room.clients.size >= 10 &&
           !room.clients.has(socket)
         ) {
           send(socket, {
