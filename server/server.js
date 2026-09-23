@@ -3,23 +3,36 @@ const crypto = require("crypto");
 const WebSocket = require("ws");
 
 const PORT = process.env.PORT || 8080;
+
 const MAX_ROOM_ID_LENGTH = 100;
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY_SIZE = 500;
+const MAX_ROOM_USERS = 10;
 
-const wss = new WebSocket.Server({ port: PORT });
+const wss = new WebSocket.Server({
+  port: PORT,
+});
+
 const rooms = new Map();
 
 console.log(`WebSocket server running on port ${PORT}`);
 
-// Send JSON data to a WebSocket client
+
+// ========================================
+// SEND JSON TO CLIENT
+// ========================================
+
 function send(socket, payload) {
   if (socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(payload));
   }
 }
 
-// Get an existing room or create a new one
+
+// ========================================
+// GET OR CREATE ROOM
+// ========================================
+
 function getRoom(roomId) {
   if (!rooms.has(roomId)) {
     rooms.set(roomId, {
@@ -31,16 +44,32 @@ function getRoom(roomId) {
   return rooms.get(roomId);
 }
 
-// Find a client by clientId
+
+// ========================================
+// GET CLIENT BY ID
+// ========================================
+
 function getClient(room, clientId) {
   return [...room.clients].find(
     (client) => client.clientId === clientId
   );
 }
 
-// Send message delivery/read status to the sender
-function broadcastStatus(room, message, status, clientId) {
-  const sender = getClient(room, message.senderId);
+
+// ========================================
+// SEND MESSAGE STATUS TO SENDER
+// ========================================
+
+function broadcastStatus(
+  room,
+  message,
+  status,
+  clientId
+) {
+  const sender = getClient(
+    room,
+    message.senderId
+  );
 
   if (sender) {
     send(sender, {
@@ -52,8 +81,16 @@ function broadcastStatus(room, message, status, clientId) {
   }
 }
 
-// Send data to everyone in the room except one socket
-function notifyRoom(room, payload, exceptSocket) {
+
+// ========================================
+// BROADCAST TO ROOM
+// ========================================
+
+function notifyRoom(
+  room,
+  payload,
+  exceptSocket = null
+) {
   for (const client of room.clients) {
     if (client !== exceptSocket) {
       send(client, payload);
@@ -61,8 +98,15 @@ function notifyRoom(room, payload, exceptSocket) {
   }
 }
 
-// Remove a client from its room
-function detachClient(socket, { broadcast = true } = {}) {
+
+// ========================================
+// REMOVE CLIENT FROM ROOM
+// ========================================
+
+function detachClient(
+  socket,
+  { broadcast = true } = {}
+) {
   const roomId = socket.roomId;
 
   if (!roomId || !rooms.has(roomId)) {
@@ -73,50 +117,73 @@ function detachClient(socket, { broadcast = true } = {}) {
 
   room.clients.delete(socket);
 
-  // Clear the socket's room information
   socket.roomId = null;
 
   if (broadcast) {
     notifyRoom(room, {
       type: "user-left",
+      clientId: socket.clientId,
     });
   }
 
-  // Delete empty rooms when there are no clients
-  // and no stored messages.
-  if (room.clients.size === 0 && room.messages.size === 0) {
+  // Delete empty room if there are no messages.
+  if (
+    room.clients.size === 0 &&
+    room.messages.size === 0
+  ) {
     rooms.delete(roomId);
   }
 }
 
-// Store a message and remove old messages
-// when the history limit is exceeded.
-function storeMessage(room, storedMessage) {
-  room.messages.set(storedMessage.id, storedMessage);
 
-  while (room.messages.size > MAX_HISTORY_SIZE) {
-    const oldestMessageId = room.messages.keys().next().value;
+// ========================================
+// STORE MESSAGE
+// ========================================
+
+function storeMessage(room, message) {
+  room.messages.set(message.id, message);
+
+  while (
+    room.messages.size > MAX_HISTORY_SIZE
+  ) {
+    const oldestMessageId =
+      room.messages.keys().next().value;
 
     room.messages.delete(oldestMessageId);
   }
 }
 
-// Check allowed message types
-function isValidMessageType(messageType) {
-  return messageType === "text" || messageType === "url";
+
+// ========================================
+// VALID MESSAGE TYPE
+// ========================================
+
+function isValidMessageType(type) {
+  return (
+    type === "text" ||
+    type === "url"
+  );
 }
 
-// WebSocket connection
+
+// ========================================
+// NEW CONNECTION
+// ========================================
+
 wss.on("connection", (socket) => {
   console.log("Client connected");
 
   socket.on("message", (data) => {
     try {
-      const message = JSON.parse(data.toString());
+      const message = JSON.parse(
+        data.toString()
+      );
 
-      // -----------------------------
+
+      // ====================================
       // PING
-      // -----------------------------
+      // ====================================
+
       if (message.type === "ping") {
         send(socket, {
           type: "pong",
@@ -125,167 +192,247 @@ wss.on("connection", (socket) => {
         return;
       }
 
-      // -----------------------------
+
+      // ====================================
       // JOIN ROOM
-      // -----------------------------
+      // ====================================
+
       if (message.type === "join") {
-        const roomId = String(message.roomId || "").trim();
-        const clientId = String(message.clientId || "").trim();
+        const roomId = String(
+          message.roomId || ""
+        ).trim();
+
+        const clientId = String(
+          message.clientId || ""
+        ).trim();
 
         if (
           !roomId ||
-          roomId.length > MAX_ROOM_ID_LENGTH ||
+          roomId.length >
+            MAX_ROOM_ID_LENGTH ||
           !clientId
         ) {
           send(socket, {
             type: "error",
-            message: "Invalid room or client ID.",
+            message:
+              "Invalid room or client ID.",
           });
 
           return;
         }
 
-        // Leave the previous room if the client
-        // is joining a different room.
-        if (socket.roomId && socket.roomId !== roomId) {
+
+        // Leave previous room
+        if (
+          socket.roomId &&
+          socket.roomId !== roomId
+        ) {
           detachClient(socket);
         }
 
+
         const room = getRoom(roomId);
 
-        const existingClient = getClient(room, clientId);
+        const existingClient =
+          getClient(
+            room,
+            clientId
+          );
 
-        // If the same client reconnects,
-        // remove the old socket without notifying
-        // the other user that the client left.
-        if (existingClient && existingClient !== socket) {
-          detachClient(existingClient, {
-            broadcast: false,
-          });
+
+        // Reconnecting client
+        if (
+          existingClient &&
+          existingClient !== socket
+        ) {
+          detachClient(
+            existingClient,
+            {
+              broadcast: false,
+            }
+          );
         }
 
-        // Maximum 2 users per room
+
+        // Room limit
         if (
-          room.clients.size >= 10 &&
+          room.clients.size >=
+            MAX_ROOM_USERS &&
           !room.clients.has(socket)
         ) {
           send(socket, {
             type: "error",
-            message: "Room is full. Maximum 2 users allowed.",
+            message:
+              `Room is full. Maximum ${MAX_ROOM_USERS} users allowed.`,
           });
 
           return;
         }
 
-        // Attach socket to the room
+
+        // Add client
         socket.roomId = roomId;
         socket.clientId = clientId;
 
         room.clients.add(socket);
 
-        // Confirm successful join
+
+        // Confirm join
         send(socket, {
           type: "joined",
           roomId,
           users: room.clients.size,
+          maxUsers: MAX_ROOM_USERS,
         });
 
-        // Send previous message history
-        for (const storedMessage of room.messages.values()) {
+
+        // Send message history
+        for (
+          const storedMessage of
+          room.messages.values()
+        ) {
           send(socket, {
             type: "message",
-            messageId: storedMessage.id,
-            messageType: storedMessage.messageType,
-            text: storedMessage.text,
-            senderId: storedMessage.senderId,
-            createdAt: storedMessage.createdAt,
+            messageId:
+              storedMessage.id,
+            messageType:
+              storedMessage.messageType,
+            text:
+              storedMessage.text,
+            senderId:
+              storedMessage.senderId,
+            createdAt:
+              storedMessage.createdAt,
             history: true,
           });
 
-          // If this user was the sender,
-          // send the current delivery/read status.
-          if (storedMessage.senderId === clientId) {
+
+          // Send sender's message status
+          if (
+            storedMessage.senderId ===
+            clientId
+          ) {
             const recipientId = [
               ...storedMessage.recipientIds,
             ][0];
 
-            const status = recipientId
-              ? storedMessage.readBy.has(recipientId)
-                ? "read"
-                : storedMessage.deliveredTo.has(recipientId)
-                  ? "delivered"
-                  : "sent"
-              : "sent";
+            let status = "sent";
+
+            if (recipientId) {
+              if (
+                storedMessage.readBy.has(
+                  recipientId
+                )
+              ) {
+                status = "read";
+              } else if (
+                storedMessage.deliveredTo.has(
+                  recipientId
+                )
+              ) {
+                status = "delivered";
+              }
+            }
 
             send(socket, {
-              type: "message-status",
-              messageId: storedMessage.id,
+              type:
+                "message-status",
+              messageId:
+                storedMessage.id,
               status,
             });
           }
         }
 
-        // Notify the other user
+
+        // Notify other users
         notifyRoom(
           room,
           {
             type: "user-joined",
+            clientId,
+            users:
+              room.clients.size,
           },
           socket
         );
 
-        console.log(`User joined room: ${roomId}`);
+        console.log(
+          `User ${clientId} joined room ${roomId}`
+        );
 
         return;
       }
 
-      // -----------------------------
-      // MESSAGE
-      // -----------------------------
-      if (message.type === "message") {
-        const room = rooms.get(socket.roomId);
 
-        const text = String(message.text || "").trim();
+      // ====================================
+      // CHAT MESSAGE
+      // ====================================
 
-        const messageType = isValidMessageType(
-          message.messageType
-        )
-          ? message.messageType
-          : "text";
+      if (
+        message.type === "message"
+      ) {
+        const room =
+          rooms.get(socket.roomId);
 
+        const text = String(
+          message.text || ""
+        ).trim();
+
+        const messageType =
+          isValidMessageType(
+            message.messageType
+          )
+            ? message.messageType
+            : "text";
+
+
+        // Validate
         if (
           !room ||
           !socket.clientId ||
           !text ||
-          text.length > MAX_MESSAGE_LENGTH
+          text.length >
+            MAX_MESSAGE_LENGTH
         ) {
           send(socket, {
             type: "error",
-            message: "Message is empty or too long.",
+            message:
+              "Message is empty or too long.",
           });
 
           return;
         }
 
-        // All other clients in the room are recipients
-        const recipients = [...room.clients].filter(
-          (client) => client !== socket
+
+        // Other users
+        const recipients = [
+          ...room.clients,
+        ].filter(
+          (client) =>
+            client !== socket
         );
+
 
         const storedMessage = {
           id: crypto.randomUUID(),
 
-          senderId: socket.clientId,
+          senderId:
+            socket.clientId,
 
-          recipientIds: new Set(
-            recipients.map(
-              (client) => client.clientId
-            )
-          ),
+          recipientIds:
+            new Set(
+              recipients.map(
+                (client) =>
+                  client.clientId
+              )
+            ),
 
-          deliveredTo: new Set(),
+          deliveredTo:
+            new Set(),
 
-          readBy: new Set(),
+          readBy:
+            new Set(),
 
           messageType,
 
@@ -294,29 +441,55 @@ wss.on("connection", (socket) => {
           createdAt: Date.now(),
         };
 
-        // Store message
-        storeMessage(room, storedMessage);
 
-        // Confirm message to sender
+        // Save message
+        storeMessage(
+          room,
+          storedMessage
+        );
+
+
+        // Confirm to sender
         send(socket, {
           type: "message-sent",
-          messageId: storedMessage.id,
-          messageType: storedMessage.messageType,
-          text: storedMessage.text,
-          senderId: storedMessage.senderId,
-          createdAt: storedMessage.createdAt,
+
+          messageId:
+            storedMessage.id,
+
+          messageType:
+            storedMessage.messageType,
+
+          text:
+            storedMessage.text,
+
+          senderId:
+            storedMessage.senderId,
+
+          createdAt:
+            storedMessage.createdAt,
         });
 
-        // Send message to other users
+
+        // Send to other users
         notifyRoom(
           room,
           {
             type: "message",
-            messageId: storedMessage.id,
-            messageType: storedMessage.messageType,
-            text: storedMessage.text,
-            senderId: storedMessage.senderId,
-            createdAt: storedMessage.createdAt,
+
+            messageId:
+              storedMessage.id,
+
+            messageType:
+              storedMessage.messageType,
+
+            text:
+              storedMessage.text,
+
+            senderId:
+              storedMessage.senderId,
+
+            createdAt:
+              storedMessage.createdAt,
           },
           socket
         );
@@ -324,31 +497,42 @@ wss.on("connection", (socket) => {
         return;
       }
 
-      // -----------------------------
+
+      // ====================================
       // DELIVERED / READ
-      // -----------------------------
+      // ====================================
+
       if (
         message.type === "delivered" ||
         message.type === "read"
       ) {
-        const room = rooms.get(socket.roomId);
+        const room =
+          rooms.get(socket.roomId);
 
         const storedMessage =
-          room?.messages.get(message.messageId);
+          room?.messages.get(
+            message.messageId
+          );
 
-        // Validate the message and make sure
-        // the current user is actually a recipient.
+
+        // Security validation
         if (
           !room ||
           !storedMessage ||
-          storedMessage.senderId === socket.clientId ||
-          !storedMessage.recipientIds.has(socket.clientId)
+          storedMessage.senderId ===
+            socket.clientId ||
+          !storedMessage.recipientIds.has(
+            socket.clientId
+          )
         ) {
           return;
         }
 
-        // READ status
-        if (message.type === "read") {
+
+        // READ
+        if (
+          message.type === "read"
+        ) {
           storedMessage.deliveredTo.add(
             socket.clientId
           );
@@ -365,7 +549,8 @@ wss.on("connection", (socket) => {
           );
         }
 
-        // DELIVERED status
+
+        // DELIVERED
         else {
           storedMessage.deliveredTo.add(
             socket.clientId
@@ -381,6 +566,7 @@ wss.on("connection", (socket) => {
 
         return;
       }
+
     } catch (error) {
       console.error(
         "Invalid message:",
@@ -389,23 +575,32 @@ wss.on("connection", (socket) => {
 
       send(socket, {
         type: "error",
-        message: "Invalid message format.",
+        message:
+          "Invalid message format.",
       });
     }
   });
 
-  // -----------------------------
-  // SOCKET CLOSED
-  // -----------------------------
+
+  // ========================================
+  // CONNECTION CLOSED
+  // ========================================
+
   socket.on("close", () => {
-    console.log("Client disconnected");
+    console.log(
+      `Client disconnected: ${
+        socket.clientId || "unknown"
+      }`
+    );
 
     detachClient(socket);
   });
 
-  // -----------------------------
+
+  // ========================================
   // SOCKET ERROR
-  // -----------------------------
+  // ========================================
+
   socket.on("error", (error) => {
     console.error(
       "Socket error:",
@@ -413,4 +608,499 @@ wss.on("connection", (socket) => {
     );
   });
 });
+
+
+
+let socket = null;
+
+const WS_URL = "ws://localhost:8080";
+
+const roomId =
+  new URLSearchParams(
+    window.location.search
+  ).get("room") || "general";
+
+let clientId =
+  localStorage.getItem("clientId");
+
+if (!clientId) {
+  clientId = crypto.randomUUID();
+
+  localStorage.setItem(
+    "clientId",
+    clientId
+  );
+}
+
+let reconnectTimer = null;
+let manuallyClosed = false;
+
+
+// ========================================
+// CONNECT WEBSOCKET
+// ========================================
+
+function connectWebSocket() {
+  if (
+    socket &&
+    (
+      socket.readyState ===
+        WebSocket.OPEN ||
+      socket.readyState ===
+        WebSocket.CONNECTING
+    )
+  ) {
+    return;
+  }
+
+  console.log(
+    "Connecting to WebSocket..."
+  );
+
+  socket = new WebSocket(
+    WS_URL
+  );
+
+
+  // ======================================
+  // OPEN
+  // ======================================
+
+  socket.onopen = () => {
+    console.log(
+      "WebSocket connected"
+    );
+
+    if (reconnectTimer) {
+      clearTimeout(
+        reconnectTimer
+      );
+
+      reconnectTimer = null;
+    }
+
+
+    // Join room
+    socket.send(
+      JSON.stringify({
+        type: "join",
+
+        roomId,
+
+        clientId,
+      })
+    );
+  };
+
+
+  // ======================================
+  // MESSAGE
+  // ======================================
+
+  socket.onmessage = (event) => {
+    try {
+      const data =
+        JSON.parse(
+          event.data
+        );
+
+      console.log(
+        "Server:",
+        data
+      );
+
+
+      // -------------------------------
+      // JOINED
+      // -------------------------------
+
+      if (
+        data.type === "joined"
+      ) {
+        console.log(
+          `Joined room: ${data.roomId}`
+        );
+
+        console.log(
+          `Users: ${data.users}/${data.maxUsers}`
+        );
+
+        return;
+      }
+
+
+      // -------------------------------
+      // NEW MESSAGE
+      // -------------------------------
+
+      if (
+        data.type === "message"
+      ) {
+        console.log(
+          "Message:",
+          data.text
+        );
+
+
+        // Automatically mark received
+        // message as delivered.
+        sendDelivered(
+          data.messageId
+        );
+
+
+        // Mark as read
+        sendRead(
+          data.messageId
+        );
+
+
+        // TODO:
+        // Add message to your chat UI.
+
+        return;
+      }
+
+
+      // -------------------------------
+      // MESSAGE SENT
+      // -------------------------------
+
+      if (
+        data.type ===
+        "message-sent"
+      ) {
+        console.log(
+          "Message sent:",
+          data.messageId
+        );
+
+        return;
+      }
+
+
+      // -------------------------------
+      // MESSAGE STATUS
+      // -------------------------------
+
+      if (
+        data.type ===
+        "message-status"
+      ) {
+        console.log(
+          "Message status:",
+          data.status
+        );
+
+        return;
+      }
+
+
+      // -------------------------------
+      // USER JOINED
+      // -------------------------------
+
+      if (
+        data.type ===
+        "user-joined"
+      ) {
+        console.log(
+          "User joined:",
+          data.clientId
+        );
+
+        return;
+      }
+
+
+      // -------------------------------
+      // USER LEFT
+      // -------------------------------
+
+      if (
+        data.type ===
+        "user-left"
+      ) {
+        console.log(
+          "User left:",
+          data.clientId
+        );
+
+        return;
+      }
+
+
+      // -------------------------------
+      // PONG
+      // -------------------------------
+
+      if (
+        data.type === "pong"
+      ) {
+        console.log(
+          "Pong received"
+        );
+
+        return;
+      }
+
+
+      // -------------------------------
+      // ERROR
+      // -------------------------------
+
+      if (
+        data.type === "error"
+      ) {
+        console.error(
+          "Server error:",
+          data.message
+        );
+
+        return;
+      }
+
+    } catch (error) {
+      console.error(
+        "Invalid server response:",
+        error
+      );
+    }
+  };
+
+
+  // ======================================
+  // CLOSE
+  // ======================================
+
+  socket.onclose = () => {
+    console.log(
+      "WebSocket disconnected"
+    );
+
+    socket = null;
+
+
+    if (
+      manuallyClosed
+    ) {
+      return;
+    }
+
+
+    // IMPORTANT:
+    // Do NOT use:
+    //
+    // location.reload();
+    //
+    // We reconnect only the WebSocket.
+
+    if (!reconnectTimer) {
+      reconnectTimer =
+        setTimeout(() => {
+          reconnectTimer =
+            null;
+
+          connectWebSocket();
+
+        }, 2000);
+    }
+  };
+
+
+  // ======================================
+  // ERROR
+  // ======================================
+
+  socket.onerror = (error) => {
+    console.error(
+      "WebSocket error:",
+      error
+    );
+  };
+}
+
+
+// ========================================
+// SEND MESSAGE
+// ========================================
+
+function sendMessage(text) {
+  text = String(
+    text || ""
+  ).trim();
+
+
+  if (!text) {
+    return;
+  }
+
+
+  if (
+    !socket ||
+    socket.readyState !==
+      WebSocket.OPEN
+  ) {
+    console.log(
+      "WebSocket is not connected"
+    );
+
+    return;
+  }
+
+
+  socket.send(
+    JSON.stringify({
+      type: "message",
+
+      messageType: "text",
+
+      text,
+    })
+  );
+}
+
+
+// ========================================
+// SEND DELIVERED
+// ========================================
+
+function sendDelivered(
+  messageId
+) {
+  if (
+    !socket ||
+    socket.readyState !==
+      WebSocket.OPEN
+  ) {
+    return;
+  }
+
+
+  socket.send(
+    JSON.stringify({
+      type: "delivered",
+
+      messageId,
+    })
+  );
+}
+
+
+// ========================================
+// SEND READ
+// ========================================
+
+function sendRead(
+  messageId
+) {
+  if (
+    !socket ||
+    socket.readyState !==
+      WebSocket.OPEN
+  ) {
+    return;
+  }
+
+
+  socket.send(
+    JSON.stringify({
+      type: "read",
+
+      messageId,
+    })
+  );
+}
+
+
+// ========================================
+// PING
+// ========================================
+
+function pingServer() {
+  if (
+    socket &&
+    socket.readyState ===
+      WebSocket.OPEN
+  ) {
+    socket.send(
+      JSON.stringify({
+        type: "ping",
+      })
+    );
+  }
+}
+
+
+// Ping every 30 seconds
+setInterval(
+  pingServer,
+  30000
+);
+
+
+// ========================================
+// CHAT FORM
+// ========================================
+
+const chatForm =
+  document.getElementById(
+    "chatForm"
+  );
+
+const messageInput =
+  document.getElementById(
+    "messageInput"
+  );
+
+
+if (chatForm) {
+  chatForm.addEventListener(
+    "submit",
+    (event) => {
+
+      // VERY IMPORTANT:
+      // Prevent browser auto-refresh.
+      event.preventDefault();
+
+      sendMessage(
+        messageInput?.value
+      );
+
+      if (messageInput) {
+        messageInput.value = "";
+
+        messageInput.focus();
+      }
+    }
+  );
+}
+
+
+// ========================================
+// START
+// ========================================
+
+connectWebSocket();
+
+
+// ========================================
+// OPTIONAL MANUAL DISCONNECT
+// ========================================
+
+function disconnectWebSocket() {
+  manuallyClosed = true;
+
+  if (reconnectTimer) {
+    clearTimeout(
+      reconnectTimer
+    );
+
+    reconnectTimer = null;
+  }
+
+  if (socket) {
+    socket.close();
+  }
+}
 
